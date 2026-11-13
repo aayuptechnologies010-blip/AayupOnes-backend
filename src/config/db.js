@@ -23,7 +23,7 @@ const initialData = {
     {
       id: "usr_emp_02",
       employeeId: "AAYUP-EMP-2026-37583",
-      name: "Rahul Verma",
+      name: "",
       email: "rahul.verma@aayuptechnologies.com",
       passwordHash: "$2a$10$wT5fN2m0j5F5xZ1J7l1iE.2gq2L5j5v5s5e5c5r5e5t5k5e5y5h5a", // rahul123
       role: "employee",
@@ -58,7 +58,7 @@ const initialData = {
     {
       id: "lv_001",
       userId: "usr_emp_02",
-      userName: "Rahul Verma",
+      userName: "",
       leaveType: "Casual Leave (CL)",
       fromDate: "2026-11-10",
       toDate: "2026-11-10",

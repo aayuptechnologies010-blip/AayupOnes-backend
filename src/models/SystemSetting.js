@@ -50,9 +50,13 @@ const systemSettingSchema = new mongoose.Schema(
       enforceBiometricsOnMobile: { type: Boolean, default: true },
       sessionTimeoutMinutes: { type: Number, default: 10080 }, // 7 days
       allowSelfOnboarding: { type: Boolean, default: true },
+      autoClockoutAtShiftEnd: { type: Boolean, default: true },
+      blockLoginAfterShiftEnd: { type: Boolean, default: true },
     },
+    type: { type: String, default: 'COMPANY_SETTINGS' },
+    data: { type: mongoose.Schema.Types.Mixed, default: null },
   },
-  { timestamps: true }
+  { timestamps: true, strict: false }
 );
 
 module.exports = mongoose.models.SystemSetting || mongoose.model('SystemSetting', systemSettingSchema);

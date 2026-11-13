@@ -1,7 +1,9 @@
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
-const User = require('../models/User');
-const { readDb } = require('../config/db');
+const Admin = require('../models/Admin');
+const Employee = require('../models/Employee');
+const SystemSetting = require('../models/SystemSetting');
+const { isWithinShiftWindow } = require('../utils/shiftTimeHelper');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'aayup_ones_enterprise_jwt_super_secret_key_2026_xyz';
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7d';
@@ -21,34 +23,26 @@ exports.login = async (req, res) => {
       });
     }
 
-    let user = null;
-
-    // 1. Try fetching from MongoDB first
-    try {
-      user = await User.findOne({
-        $or: [
-          { email: identifier.toLowerCase() },
-          { employeeId: identifier.toUpperCase() }
-        ]
-      });
-    } catch (dbErr) {
-      console.warn('MongoDB query notice, checking local store:', dbErr.message);
-    }
-
-    // 2. If not found in Mongo, check fallback file store
-    if (!user) {
-      const db = readDb();
-      const localUser = db.users.find(u => 
-        (u.email && u.email.toLowerCase() === identifier.toLowerCase()) ||
-        (u.employeeId && u.employeeId.toLowerCase() === identifier.toLowerCase())
-      );
-      if (localUser) user = localUser;
-    }
+    // 1. Fetch strictly from dedicated 'employees' collection
+    const user = await Employee.findOne({
+      $or: [
+        { email: identifier.toLowerCase() },
+        { employeeId: identifier.toUpperCase() }
+      ]
+    });
 
     if (!user) {
       return res.status(401).json({
         success: false,
-        message: 'No active employee/admin record found matching this ID.'
+        message: 'No active employee record found matching this ID/Email.'
+      });
+    }
+
+    // Strict Role Separation: Mobile App is ONLY for Employees
+    if (user.role === 'admin') {
+      return res.status(403).json({
+        success: false,
+        message: 'Admin accounts cannot log in to the employee mobile app. Please use the Admin Web Portal.'
       });
     }
 
@@ -68,6 +62,26 @@ exports.login = async (req, res) => {
       });
     }
 
+    // 2. Shift Timing Compliance Check for Employees
+    const systemSetting = await SystemSetting.findOne({ type: 'COMPANY_SETTINGS' }) || await SystemSetting.findOne({});
+    const shiftData = systemSetting?.data || {};
+    const shiftStart = shiftData.shiftStartTime || (systemSetting?.shifts?.[0]?.startTime) || '09:30 AM';
+    const shiftEnd = shiftData.shiftEndTime || (systemSetting?.shifts?.[0]?.endTime) || '06:30 PM';
+    const blockLoginAfterShiftEnd = shiftData.blockLoginAfterShiftEnd ?? true;
+
+    const serverNow = new Date();
+    const isShiftActive = isWithinShiftWindow(shiftStart, shiftEnd, serverNow);
+
+    if (blockLoginAfterShiftEnd && !isShiftActive) {
+      return res.status(403).json({
+        success: false,
+        isShiftClosed: true,
+        shiftStartTime: shiftStart,
+        shiftEndTime: shiftEnd,
+        message: `Shift closed. Office hours are from ${shiftStart} to ${shiftEnd}. You can log in tomorrow morning starting at ${shiftStart}.`
+      });
+    }
+
     const tokenPayload = {
       id: user._id ? user._id.toString() : user.id,
       employeeId: user.employeeId,
@@ -82,6 +96,13 @@ exports.login = async (req, res) => {
       success: true,
       message: 'Authentication successful. Session initialized.',
       token,
+      shiftInfo: {
+        shiftStartTime: shiftStart,
+        shiftEndTime: shiftEnd,
+        isShiftActive: isShiftActive,
+        autoClockoutAtShiftEnd: shiftData.autoClockoutAtShiftEnd ?? true,
+        serverTime: serverNow.toISOString(),
+      },
       user: {
         id: tokenPayload.id,
         employeeId: user.employeeId,
@@ -93,7 +114,11 @@ exports.login = async (req, res) => {
         joiningDate: user.joiningDate,
         status: user.status,
         avatarInitials: user.avatarInitials || 'AP',
-        phone: user.phone || ''
+        profilePic: user.profilePic || '',
+        phone: user.phone || '',
+        onboardingStatus: user.onboardingStatus || 'Not Started',
+        onboardingProgress: user.onboardingProgress || 0,
+        dob: user.dob || ''
       }
     });
   } catch (error) {
@@ -117,29 +142,13 @@ exports.adminLogin = async (req, res) => {
       });
     }
 
-    let user = null;
-
-    // Try MongoDB
-    try {
-      user = await User.findOne({
-        $or: [
-          { email: identifier.toLowerCase() },
-          { employeeId: identifier.toUpperCase() }
-        ]
-      });
-    } catch (dbErr) {
-      console.warn('MongoDB query notice, checking local store:', dbErr.message);
-    }
-
-    // Fallback store
-    if (!user) {
-      const db = readDb();
-      const localUser = db.users.find(u => 
-        (u.email && u.email.toLowerCase() === identifier.toLowerCase()) ||
-        (u.employeeId && u.employeeId.toLowerCase() === identifier.toLowerCase())
-      );
-      if (localUser) user = localUser;
-    }
+    // Fetch strictly from dedicated 'admins' collection
+    const user = await Admin.findOne({
+      $or: [
+        { email: identifier.toLowerCase() },
+        { employeeId: identifier.toUpperCase() }
+      ]
+    });
 
     if (!user) {
       return res.status(401).json({
@@ -184,6 +193,13 @@ exports.adminLogin = async (req, res) => {
       success: true,
       message: 'Welcome to AayupOnes Administrative Console.',
       token,
+      shiftInfo: {
+        shiftStartTime: shiftStart,
+        shiftEndTime: shiftEnd,
+        isShiftActive: isShiftActive,
+        autoClockoutAtShiftEnd: shiftData.autoClockoutAtShiftEnd ?? true,
+        serverTime: serverNow.toISOString(),
+      },
       user: {
         id: tokenPayload.id,
         employeeId: user.employeeId,
@@ -207,15 +223,9 @@ exports.adminLogin = async (req, res) => {
  */
 exports.getProfile = async (req, res) => {
   try {
-    let user = null;
-
-    try {
-      user = await User.findById(req.user.id);
-    } catch (e) {}
-
+    let user = await Admin.findById(req.user.id);
     if (!user) {
-      const db = readDb();
-      user = db.users.find(u => u.id === req.user.id || (u._id && u._id.toString() === req.user.id));
+      user = await Employee.findById(req.user.id);
     }
 
     if (!user) {
@@ -229,15 +239,49 @@ exports.getProfile = async (req, res) => {
         employeeId: user.employeeId,
         name: user.name,
         email: user.email,
+        phone: user.phone || '+91 98765 43210',
         role: user.role,
         designation: user.designation,
         department: user.department,
         joiningDate: user.joiningDate,
+        location: user.location || 'Lucknow Headquarters, UP',
+        bloodGroup: user.bloodGroup || 'O+ Positive',
+        emergencyContact: user.emergencyContact || '+91 98111 22334',
         status: user.status,
-        avatarInitials: user.avatarInitials || 'AP'
+        avatarInitials: user.avatarInitials || (user.name ? user.name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase() : 'AD')
       }
     });
   } catch (error) {
     return res.status(500).json({ success: false, message: 'Server error fetching profile.' });
+  }
+};
+
+/**
+ * Update Current User Profile
+ */
+exports.updateProfile = async (req, res) => {
+  try {
+    const { name, phone, emergencyContact, bloodGroup, location } = req.body;
+    let user = await Admin.findById(req.user.id);
+    if (!user) {
+      user = await Employee.findById(req.user.id);
+    }
+
+    if (user) {
+      if (name) user.name = name;
+      if (phone) user.phone = phone;
+      if (emergencyContact) user.emergencyContact = emergencyContact;
+      if (bloodGroup) user.bloodGroup = bloodGroup;
+      if (location) user.location = location;
+      await user.save();
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'Profile updated successfully!',
+      user: user || req.body
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: 'Server error updating profile.' });
   }
 };

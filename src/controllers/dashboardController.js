@@ -1,8 +1,10 @@
-const User = require('../models/User');
+const Employee = require('../models/Employee');
+const Admin = require('../models/Admin');
 const Attendance = require('../models/Attendance');
 const Leave = require('../models/Leave');
 const Document = require('../models/Document');
-const { readDb } = require('../config/db');
+const Ticket = require('../models/Ticket');
+const Reimbursement = require('../models/Reimbursement');
 
 /**
  * High-Speed Dynamic Dashboard Analytics Aggregator
@@ -16,6 +18,8 @@ exports.getDashboardStats = async (req, res) => {
     let presentToday = 0;
     let onLeaveCount = 0;
     let pendingApprovalsCount = 0;
+    let pendingClaimsCount = 0;
+    let activeHelpdeskCount = 0;
     let recentApprovals = [];
     let departmentStats = [];
 
@@ -52,18 +56,25 @@ exports.getDashboardStats = async (req, res) => {
         leavesPending,
         recentLeaves,
         deptGroup,
-        weeklyRecords
+        weeklyRecords,
+        pendingReimbursements,
+        openTickets
       ] = await Promise.all([
-        User.countDocuments({ status: 'ACTIVE' }),
+        Employee.countDocuments({ status: 'ACTIVE' }),
         Attendance.find({ date: todayStr }),
         Leave.countDocuments({ status: 'PENDING' }),
         Leave.find({ status: 'PENDING' }).sort({ createdAt: -1 }).limit(4),
-        User.aggregate([
+        Employee.aggregate([
           { $match: { status: 'ACTIVE' } },
           { $group: { _id: '$department', count: { $sum: 1 } } }
         ]),
-        Attendance.find({ date: { $in: pastDays } })
+        Attendance.find({ date: { $in: pastDays } }),
+        Reimbursement.countDocuments({ status: 'PENDING' }).catch(() => 0),
+        Ticket.countDocuments({ status: { $in: ['OPEN', 'IN_PROGRESS'] } }).catch(() => 0)
       ]);
+
+      pendingClaimsCount = pendingReimbursements || 0;
+      activeHelpdeskCount = openTickets || 0;
 
       if (usersCount > 0) {
         totalEmployees = usersCount;
@@ -113,56 +124,8 @@ exports.getDashboardStats = async (req, res) => {
       console.warn('MongoDB query warning in dashboard:', mongoErr.message);
     }
 
-    // 2. High-speed Fallback if MongoDB is initializing or records are fresh
-    if (totalEmployees === 0 || weeklyInOffice.every(v => v === 0)) {
-      const db = readDb();
-      totalEmployees = (db.users || []).length || 42;
-      
-      // Proportional real dynamic calculation based on total headcount
-      const baseCount = Math.max(1, totalEmployees);
-      weeklyInOffice = [
-        Math.round(baseCount * 0.88),
-        Math.round(baseCount * 0.92),
-        Math.round(baseCount * 0.95),
-        Math.round(baseCount * 0.93),
-        Math.round(baseCount * 0.90),
-        Math.round(baseCount * 0.85)
-      ];
-      weeklyWfh = [
-        Math.max(1, Math.round(baseCount * 0.08)),
-        Math.max(1, Math.round(baseCount * 0.06)),
-        Math.max(1, Math.round(baseCount * 0.04)),
-        Math.max(1, Math.round(baseCount * 0.05)),
-        Math.max(1, Math.round(baseCount * 0.07)),
-        Math.max(1, Math.round(baseCount * 0.04))
-      ];
-
-      presentToday = weeklyInOffice[weeklyInOffice.length - 1];
-      onLeaveCount = Math.max(1, totalEmployees - presentToday);
-      pendingApprovalsCount = (db.leaves || []).filter(l => l.status === 'PENDING').length || 2;
-
-      recentApprovals = (db.leaves || []).slice(0, 3).map(l => ({
-        id: l.id,
-        emp: l.userName || 'Rahul Verma',
-        role: l.employeeId || 'AAYUP-EMP-2026-37583',
-        type: l.leaveType,
-        dates: `${l.fromDate} (${l.session})`,
-        reason: l.reason,
-        status: l.status || 'Pending',
-        avatar: (l.userName || 'RV').substring(0, 2).toUpperCase()
-      }));
-
-      departmentStats = [
-        { name: 'Core Engineering', y: Math.round(baseCount * 0.55), color: '#0066d6' },
-        { name: 'Product Design', y: Math.round(baseCount * 0.15), color: '#ec4899' },
-        { name: 'QA & Testing', y: Math.round(baseCount * 0.12), color: '#f59e0b' },
-        { name: 'People & HR', y: Math.round(baseCount * 0.10), color: '#10b981' },
-        { name: 'Marketing', y: Math.max(1, totalEmployees - Math.round(baseCount * 0.92)), color: '#8b5cf6' }
-      ];
-    }
-
-    const turnoutPercentage = totalEmployees > 0 
-      ? ((presentToday / totalEmployees) * 100).toFixed(1) 
+    const turnoutPercentage = totalEmployees > 0
+      ? ((presentToday / totalEmployees) * 100).toFixed(1)
       : '90.5';
 
     // Shift Distribution Breakdown (General vs 24/7 vs Night)
@@ -180,7 +143,9 @@ exports.getDashboardStats = async (req, res) => {
         presentToday: presentToday,
         turnoutPercentage: `${turnoutPercentage}%`,
         onLeaveOrWfh: onLeaveCount,
-        pendingApprovals: pendingApprovalsCount
+        pendingApprovals: pendingApprovalsCount,
+        pendingReimbursements: pendingClaimsCount,
+        openHelpdesk: activeHelpdeskCount
       },
       charts: {
         attendanceAndShift: {

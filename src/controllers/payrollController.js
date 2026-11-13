@@ -1,6 +1,6 @@
 const Payroll = require('../models/Payroll');
 const Payslip = require('../models/Payslip');
-const User = require('../models/User');
+const Employee = require('../models/Employee');
 
 /**
  * GET /api/payroll
@@ -22,29 +22,7 @@ exports.getPayrollData = async (req, res) => {
       console.warn('MongoDB payroll query:', e.message);
     }
 
-    // If records empty, pull employees and calculate standard structure
-    if (records.length === 0) {
-      const users = await User.find({ status: 'ACTIVE' }).catch(() => []);
-      records = users.map(u => ({
-        id: u._id.toString(),
-        userId: u,
-        month,
-        basicSalary: 35000,
-        hra: 18000,
-        allowances: 12000,
-        bonus: 0,
-        grossSalary: 65000,
-        providentFund: 2160,
-        professionalTax: 200,
-        tds: 2500,
-        totalDeductions: 4860,
-        netPay: 60140,
-        status: 'Processed',
-        paymentStatus: 'Paid',
-        disbursedOn: '01 Nov 2026'
-      }));
-    }
-
+    // Records fetched purely from MongoDB Payroll collection
     let formatted = records.map(p => {
       const u = p.userId || {};
       const gross = p.grossSalary || ((p.basicSalary || 0) + (p.hra || 0) + (p.allowances || 0) + (p.bonus || 0));

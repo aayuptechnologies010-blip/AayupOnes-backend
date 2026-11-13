@@ -3,6 +3,9 @@ const router = express.Router();
 const employeeController = require('../controllers/employeeController');
 const { authenticateToken, requireRole } = require('../middlewares/auth');
 
+// Public Onboarding Form Submission (Requires no pre-authenticated admin token)
+router.post('/onboard/:token/submit', employeeController.submitOnboarding);
+
 // All employee administration endpoints require authentication
 router.use(authenticateToken);
 

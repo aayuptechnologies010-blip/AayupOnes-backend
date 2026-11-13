@@ -86,7 +86,7 @@ const userSchema = new mongoose.Schema(
     },
     manager: {
       type: String,
-      default: 'Rahul Kumar (HR Admin)',
+      default: 'Aayup Admin (HR Head)',
     },
     isOnDuty: {
       type: Boolean,

@@ -14,13 +14,21 @@ const attendanceRoutes = require('./routes/attendanceRoutes');
 const payrollRoutes = require('./routes/payrollRoutes');
 const payslipRoutes = require('./routes/payslipRoutes');
 const reimbursementRoutes = require('./routes/reimbursementRoutes');
+const announcementRoutes = require('./routes/announcementRoutes');
 const { connectDB } = require('./config/mongo');
+const { initBirthdayCron } = require('./services/birthdayScheduler');
+const { initOnboardingReminderCron } = require('./services/onboardingReminderScheduler');
+const { initFirebase } = require('./services/fcmService');
 
 const app = express();
 const PORT = process.env.PORT || 8080;
 
-// Connect to MongoDB
-connectDB();
+// Connect to MongoDB & Initialize Schedulers & Firebase
+connectDB().then(() => {
+  initBirthdayCron();
+  initOnboardingReminderCron();
+  initFirebase();
+});
 
 // Security & Parsing Middlewares
 app.use(helmet());
@@ -64,6 +72,7 @@ app.use('/api/attendance', attendanceRoutes);
 app.use('/api/payroll', payrollRoutes);
 app.use('/api/payslips', payslipRoutes);
 app.use('/api/reimbursements', reimbursementRoutes);
+app.use('/api/announcements', announcementRoutes);
 
 // Global Error Handler
 app.use((err, req, res, next) => {

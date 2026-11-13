@@ -6,6 +6,12 @@ const { authenticateToken, requireRole } = require('../middlewares/auth');
 router.use(authenticateToken);
 
 router.get('/', attendanceController.getAttendanceLogs);
-router.post('/regularize', requireRole(['admin', 'hr']), attendanceController.regularizeAttendance);
+router.get('/logs', attendanceController.getAttendanceLogs);
+router.get('/shift-config', attendanceController.getShiftConfig);
+router.post('/punch-in', attendanceController.punchIn);
+router.post('/punch-out', attendanceController.punchOut);
+router.post('/auto-clockout', attendanceController.autoClockout);
+router.post('/verify-face', attendanceController.verifyFace);
+router.post('/regularize', attendanceController.regularizeAttendance);
 
 module.exports = router;

@@ -9,7 +9,8 @@ router.post('/login', authController.login);
 // Admin / HR exclusive login
 router.post('/admin/login', authController.adminLogin);
 
-// Current logged in user profile check
+// Current logged in user profile check & update
 router.get('/me', authenticateToken, authController.getProfile);
+router.put('/profile', authenticateToken, authController.updateProfile);
 
 module.exports = router;

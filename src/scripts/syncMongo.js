@@ -92,7 +92,7 @@ async function syncToMongo() {
       {
         userId: rahulUser ? rahulUser._id : new mongoose.Types.ObjectId(),
         employeeId: rahulUser ? rahulUser.employeeId : 'AAYUP-EMP-2026-37583',
-        employeeName: l.userName || 'Rahul Verma',
+        employeeName: l.userName || '',
         leaveType: l.leaveType,
         fromDate: l.fromDate,
         toDate: l.toDate,
