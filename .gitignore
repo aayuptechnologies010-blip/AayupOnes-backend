@@ -1,6 +1,23 @@
+# Dependency directories
 node_modules/
-.env
-*.log
-data/
-firebase-service-account.json
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
 
+# Environment and sensitive credential files
+.env
+.env.*
+!.env.example
+firebase-service-account.json
+service-account*.json
+*.pem
+*.key
+
+# Database and uploaded storage
+data/
+uploads/
+*.log
+
+# Operating System files
+.DS_Store
+Thumbs.db
