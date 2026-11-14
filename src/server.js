@@ -53,14 +53,34 @@ app.use(cors({
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
 // Root Health Check Route
-app.get('/api/health', (req, res) => {
+const healthHandler = (req, res) => {
+  const isMongoReady = mongoose.connection.readyState === 1;
+  const mongoStates = {
+    0: 'DISCONNECTED',
+    1: 'CONNECTED',
+    2: 'CONNECTING',
+    3: 'DISCONNECTING'
+  };
+
   res.status(200).json({
     status: 'ONLINE',
     service: 'AayupOnes Enterprise API Backend',
+    database: {
+      status: mongoStates[mongoose.connection.readyState] || 'UNKNOWN',
+      connected: isMongoReady,
+      host: mongoose.connection.host || 'Atlas Cloud',
+      name: mongoose.connection.name || 'aayupones_hrms'
+    },
+    uptimeSeconds: Math.floor(process.uptime()),
     timestamp: new Date().toISOString(),
     version: '1.0.0'
   });
-});
+};
+
+// Available at root '/' and '/api/health' and '/health'
+app.get('/', healthHandler);
+app.get('/health', healthHandler);
+app.get('/api/health', healthHandler);
 
 // Modular Routes
 app.use('/api/auth', authRoutes);
