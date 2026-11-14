@@ -11,6 +11,8 @@ router.post('/shift/toggle', authenticateToken, opsController.toggleShift);
 
 // Admin Web Specific Routes
 router.get('/documents-list', authenticateToken, opsController.getDocumentsList);
+router.post('/documents/issue', authenticateToken, opsController.issueEmployeeDocument);
+router.delete('/documents/:id', authenticateToken, opsController.deleteDocument);
 router.get('/helpdesk-tickets', authenticateToken, opsController.getHelpdeskTickets);
 router.post('/helpdesk-tickets', authenticateToken, opsController.createHelpdeskTicket);
 router.patch('/helpdesk-tickets/:id', authenticateToken, opsController.updateTicketStatus);

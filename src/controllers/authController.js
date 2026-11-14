@@ -193,13 +193,6 @@ exports.adminLogin = async (req, res) => {
       success: true,
       message: 'Welcome to AayupOnes Administrative Console.',
       token,
-      shiftInfo: {
-        shiftStartTime: shiftStart,
-        shiftEndTime: shiftEnd,
-        isShiftActive: isShiftActive,
-        autoClockoutAtShiftEnd: shiftData.autoClockoutAtShiftEnd ?? true,
-        serverTime: serverNow.toISOString(),
-      },
       user: {
         id: tokenPayload.id,
         employeeId: user.employeeId,

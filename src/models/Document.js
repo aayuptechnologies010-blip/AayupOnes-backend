@@ -48,11 +48,27 @@ const documentSchema = new mongoose.Schema(
     },
     allowDownload: {
       type: Boolean,
-      default: false, // false for My Documents (Onboarding), true for Company Documents
+      default: true,
     },
     digitalHash: {
       type: String,
       default: 'SHA256:4f8b9e1c3a7d2e5b8c0a9f1e3d5b7a9c',
+    },
+    remarks: {
+      type: String,
+      default: '',
+    },
+    sentViaEmail: {
+      type: Boolean,
+      default: false,
+    },
+    sentToApp: {
+      type: Boolean,
+      default: true,
+    },
+    issuedBy: {
+      type: String,
+      default: 'Admin HR',
     },
   },
   { timestamps: true }

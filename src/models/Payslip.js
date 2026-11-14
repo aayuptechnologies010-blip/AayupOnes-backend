@@ -44,6 +44,9 @@ const payslipSchema = new mongoose.Schema(
       default: 'GENERATED',
     },
     pdfUrl: { type: String, default: '' },
+    sentViaEmail: { type: Boolean, default: false },
+    sentToApp: { type: Boolean, default: false },
+    lastSentAt: { type: Date, default: null },
     generatedDate: {
       type: String,
       default: () => new Date().toISOString().split('T')[0],

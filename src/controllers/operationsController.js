@@ -10,6 +10,8 @@ const Task = require('../models/Task');
 const Notification = require('../models/Notification');
 const Payslip = require('../models/Payslip');
 const Attendance = require('../models/Attendance');
+const { sendMail, getDocumentEmailTemplate } = require('../services/emailService');
+const { sendPushNotification } = require('../services/fcmService');
 
 /**
  * Mobile App Endpoints
@@ -97,25 +99,180 @@ exports.toggleShift = async (req, res) => {
  */
 exports.getDocumentsList = async (req, res) => {
   try {
-    let docs = await Document.find({}).populate('userId', 'fullName employeeId department designation').sort({ createdAt: -1 });
+    let docs = await Document.find({}).populate('userId', 'fullName name employeeId department designation email').sort({ createdAt: -1 });
 
-    const formatted = docs.map(d => ({
-      id: d._id ? d._id.toString() : d.id,
-      title: d.title,
-      category: d.category || 'General Document',
-      department: d.department || 'All Departments',
-      fileUrl: d.fileUrl || '#',
-      fileSize: d.fileSize || '1.5 MB',
-      uploadedBy: d.uploadedBy || (d.userId ? d.userId.fullName : 'HR Department'),
-      uploadedOn: d.createdAt ? new Date(d.createdAt).toLocaleDateString('en-GB') : '01 Nov 2026',
-      status: d.status || 'APPROVED',
-      isMandatory: d.isMandatory || false
-    }));
+    const formatted = docs.map(d => {
+      const u = d.userId || {};
+      const empName = u.fullName || u.name || d.employeeName || 'All Employees';
+      return {
+        id: d._id ? d._id.toString() : d.id,
+        title: d.title,
+        category: d.category || 'General Document',
+        type: d.type || 'my_document',
+        department: d.department || u.department || 'All Departments',
+        employeeId: d.employeeId || u.employeeId || 'ALL',
+        employeeName: empName,
+        email: u.email || '',
+        fileName: d.fileName || 'document.pdf',
+        fileUrl: d.fileUrl || '#',
+        fileSize: d.fileSize || '1.5 MB',
+        uploadedBy: d.issuedBy || 'HR Department',
+        uploadedOn: d.createdAt ? new Date(d.createdAt).toLocaleDateString('en-GB') : '01 Nov 2026',
+        status: d.status || 'APPROVED',
+        allowDownload: d.allowDownload ?? true,
+        sentToApp: Boolean(d.sentToApp),
+        sentViaEmail: Boolean(d.sentViaEmail),
+      };
+    });
 
     return res.status(200).json({ success: true, data: formatted });
   } catch (error) {
     console.error('Error fetching documents:', error);
     return res.status(500).json({ success: false, message: 'Failed to fetch documents.' });
+  }
+};
+
+/**
+ * POST /api/operations/documents/issue
+ * Admin uploads and issues Offer Letter, Joining Letter, or any HR doc to Employee
+ * Dispatches to Mobile App and/or Email as selected by Admin
+ */
+exports.issueEmployeeDocument = async (req, res) => {
+  try {
+    const {
+      employeeId,
+      category, // 'Offer Letter', 'Joining Letter', 'Appointment Letter', 'Relieving Letter', 'Policy'
+      title,
+      fileName,
+      fileBase64,
+      fileUrl,
+      remarks = '',
+      sendToApp = true,
+      sendToEmail = true,
+    } = req.body;
+
+    if (!employeeId || !category || !title) {
+      return res.status(400).json({
+        success: false,
+        message: 'Employee, category, and document title are required.',
+      });
+    }
+
+    const isGlobal = employeeId === 'ALL';
+    let targetEmployee = null;
+    if (!isGlobal) {
+      targetEmployee = await Employee.findOne({ employeeId: employeeId.toUpperCase() });
+      if (!targetEmployee) {
+        return res.status(404).json({ success: false, message: 'Employee not found with provided ID.' });
+      }
+    }
+
+    // Save uploaded document in MongoDB
+    const newDoc = await Document.create({
+      userId: targetEmployee?._id || null,
+      employeeId: isGlobal ? 'ALL' : targetEmployee.employeeId,
+      type: isGlobal ? 'company_document' : 'my_document',
+      profileMode: 'All',
+      category,
+      title,
+      fileName: fileName || `${category.replace(/\s+/g, '_')}_${employeeId}.pdf`,
+      fileUrl: fileUrl || fileBase64 || '',
+      uploadDate: new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }),
+      status: 'APPROVED',
+      allowDownload: true,
+      remarks,
+      sentToApp,
+      sentViaEmail,
+      issuedBy: req.user?.name || 'HR Operations',
+    });
+
+    let appDelivered = false;
+    let emailDelivered = false;
+
+    // 1. Dispatch to Mobile App (Notification + In-app badge)
+    if (sendToApp) {
+      try {
+        await Notification.create({
+          userId: targetEmployee?._id,
+          employeeId: isGlobal ? 'ALL' : targetEmployee.employeeId,
+          type: 'DOCUMENT',
+          title: `New Document Issued: ${title}`,
+          desc: `HR has issued your ${category}: ${title}. Tap to view and download.`,
+          isUnread: true,
+          route: '/documents',
+        });
+
+        if (targetEmployee?.fcmToken) {
+          await sendPushNotification({
+            fcmToken: targetEmployee.fcmToken,
+            title: `Document Issued: ${category}`,
+            body: `Your official ${title} is ready to download in AayupOnes app.`,
+            data: { route: '/documents', documentId: newDoc._id.toString() },
+          });
+        }
+        appDelivered = true;
+      } catch (e) {
+        console.warn('App notification warning on doc issue:', e.message);
+      }
+    }
+
+    // 2. Dispatch to Employee's Registered Email
+    if (sendToEmail && targetEmployee?.email) {
+      try {
+        const html = getDocumentEmailTemplate({
+          employeeName: targetEmployee.name,
+          documentTitle: title,
+          category,
+          remarks,
+          downloadUrl: fileUrl || '',
+        });
+
+        const attachments = [];
+        if (fileBase64 && fileBase64.startsWith('data:')) {
+          const match = fileBase64.match(/^data:(.+);base64,(.+)$/);
+          if (match) {
+            attachments.push({
+              filename: fileName || `${title.replace(/\s+/g, '_')}.pdf`,
+              content: Buffer.from(match[2], 'base64'),
+              contentType: match[1],
+            });
+          }
+        }
+
+        const mailRes = await sendMail({
+          to: targetEmployee.email,
+          subject: `Aayup Technologies: Official ${category} - ${title}`,
+          html,
+          attachments,
+        });
+        emailDelivered = mailRes.success;
+      } catch (err) {
+        console.error('Email dispatch error on doc issue:', err.message);
+      }
+    }
+
+    return res.status(201).json({
+      success: true,
+      message: `Document issued successfully!${appDelivered ? ' [Sent to App]' : ''}${emailDelivered ? ' [Sent to Email]' : ''}`,
+      data: newDoc,
+    });
+  } catch (error) {
+    console.error('Error issuing employee document:', error);
+    return res.status(500).json({ success: false, message: 'Failed to issue employee document.' });
+  }
+};
+
+/**
+ * DELETE /api/operations/documents/:id
+ * Delete document
+ */
+exports.deleteDocument = async (req, res) => {
+  try {
+    const { id } = req.params;
+    await Document.findByIdAndDelete(id);
+    return res.status(200).json({ success: true, message: 'Document removed successfully.' });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: 'Failed to delete document.' });
   }
 };
 
